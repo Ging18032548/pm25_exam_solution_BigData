@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,10 +38,20 @@ def md5_of(path: Path) -> str:
 
 def parse_mixed_datetime(series: pd.Series) -> pd.Series:
     """raw มี 2 ฟอร์แมตคละกัน: ISO yyyy-MM-dd HH:mm (ค.ศ.) และ dd/MM/yyyy HH:mm (พ.ศ.)
-    ต้องแยกฟอร์แมตก่อนแปลง แล้วลบ 543 เฉพาะปี พ.ศ. (year > 2400)"""
+    ข้อควรระวัง: pandas Timestamp จำกัดช่วงปี ~1677-2262 (nanosecond resolution)
+    ปี พ.ศ. 25xx parse ตรง ๆ ไม่ได้ (ได้ NaT) -- ต้องลบ 543 "ในสตริง" ก่อน parse
+    (เทคนิคเดียวกับที่ spark/task3_cleaning.py ใช้)"""
     iso = pd.to_datetime(series, format="%Y-%m-%d %H:%M", errors="coerce")
-    be = pd.to_datetime(series, format="%d/%m/%Y %H:%M", errors="coerce")
-    be = be - pd.DateOffset(years=543)
+
+    def be_to_ce(match: "re.Match[str]") -> str:
+        d, m, y = match.group(1), match.group(2), int(match.group(3))
+        if y > 2400:                       # ปี พ.ศ. เท่านั้น (เช่น 2568 -> 2025)
+            y -= 543
+        return f"{d}/{m}/{y:04d}"
+
+    be_str = series.astype("string").str.replace(
+        r"^(\d{1,2})/(\d{1,2})/(\d{4})", be_to_ce, regex=True)
+    be = pd.to_datetime(be_str, format="%d/%m/%Y %H:%M", errors="coerce")
     return iso.fillna(be)
 
 

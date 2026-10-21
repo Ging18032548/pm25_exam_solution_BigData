@@ -60,15 +60,20 @@ def main() -> None:
     lines.append(f"- สัดส่วนหน่วย: {unit_counts} "
                  "(ต้องแปลง AQI -> µg/m³ ด้วยสูตร x1.25 จาก standards.xlsx ก่อนรวมกัน)")
 
-    # 6) ฟอร์แมตวันที่
+    # 6) ฟอร์แมตวันที่ -- ปี พ.ศ. 25xx อยู่นอกช่วง pandas Timestamp (1677-2262)
+    #    จึงต้องลบ 543 ในสตริงก่อน parse (parse ตรง ๆ จะได้ NaT ทั้งหมด)
+    ce_str = df["reading_time"].astype("string").str.replace(
+        r"^(\d{1,2})/(\d{1,2})/(\d{4})",
+        lambda m: f"{m.group(1)}/{m.group(2)}/{int(m.group(3)) - 543 if int(m.group(3)) > 2400 else int(m.group(3)):04d}",
+        regex=True)
     iso = pd.to_datetime(df["reading_time"], format="%Y-%m-%d %H:%M", errors="coerce")
-    be = pd.to_datetime(df["reading_time"], format="%d/%m/%Y %H:%M", errors="coerce")
+    be = pd.to_datetime(ce_str, format="%d/%m/%Y %H:%M", errors="coerce")
     n_iso, n_be = int(iso.notna().sum()), int(be.notna().sum())
     lines += ["", "## ฟอร์แมต `reading_time`", "",
               f"- ISO ค.ศ.: {n_iso:,} แถว | ไทย พ.ศ.: {n_be:,} แถว | อื่น ๆ: "
               f"{len(df) - n_iso - n_be} แถว",
-              f"- ช่วงวันที่จริง: {min(iso.min(), (be - pd.DateOffset(years=543)).min()):%Y-%m-%d}"
-              f" ถึง {max(iso.max(), (be - pd.DateOffset(years=543)).max()):%Y-%m-%d}"]
+              f"- ช่วงวันที่จริง: {min(iso.min(), be.min()):%Y-%m-%d}"
+              f" ถึง {max(iso.max(), be.max()):%Y-%m-%d}"]
 
     # 7) สรุปปัญหา (เฉลย 5 ข้อ)
     lines += ["", "## สรุปปัญหาคุณภาพที่พบ (สำหรับ Task 3)", "",

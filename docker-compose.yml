@@ -1,0 +1,112 @@
+# =====================================================================
+# Local development stack สำหรับ PM2.5 pipeline (แนวเดียวกับ
+# Disease-Surveillance-BigData): Postgres (metadata) + Postgres (warehouse)
+# + Apache Airflow (LocalExecutor) ที่ build image เองจาก ./airflow
+#
+# ใช้งาน:
+#   1) cp .env.example .env   (แล้วแก้ค่าได้ตามต้องการ -- ห้าม commit .env)
+#   2) docker compose up -d --build
+#   3) เปิด http://localhost:9090  (default: airflow / airflow-local-only)
+#   4) unpause DAG แล้ว trigger ได้เลย:
+#        pm25_00_sample_bootstrap   (demo ด้วยชุดจำลอง)
+#        pm25_01_air4thai_ingest    (demo ด้วยข้อมูลจริง)
+#   5) สำรวจ warehouse: psql/DBeaver -> localhost:5434, db=pm25
+#      (ภายใน docker network ใช้ host=postgres_target port=5432)
+#
+# ข้อมูลเข้า-ออกผ่าน volume mount:
+#   ./data   -> /opt/airflow/project/data    (source/raw/processed)
+#   ./output -> /opt/airflow/project/output  (profiling report + charts)
+# =====================================================================
+services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow-local-only}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Data Warehouse ปลายทางของ task4 (star schema ตาราง dim_*/fact_readings)
+  # แยกจาก metadata DB ของ Airflow เด็ดขาด -- host port 5434 กันชนกับ
+  # postgres ตัวอื่นในเครื่อง (ใช้ DBeaver/pgAdmin ที่ localhost:5434)
+  # ------------------------------------------------------------------
+  postgres_target:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: pm25
+      POSTGRES_PASSWORD: ${PM25_DB_PASSWORD:-pm25-local-only}
+      POSTGRES_DB: pm25
+    ports:
+      - "5434:5432"                      # ← เปลี่ยนจาก 5433 เป็น 5434 (ฝั่งซ้ายเท่านั้น)
+    volumes:
+      - postgres_target_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm25 -d pm25"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  airflow:
+    build: ./airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres_target:
+        condition: service_healthy
+    command: standalone
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow-local-only}@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local-development-secret-key}
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow-local-only}
+      # ---- เขียน/อ่านข้อมูลของ pipeline ----
+      # task4 อ่าน DB_URL นี้ (load_dotenv ไม่ override env ที่ตั้งมาแล้ว)
+      # หมายเหตุ: ยังใช้ postgres_target:5432 เพราะเป็น port ภายใน container
+      # (port ภายนอก 5434 ไม่กระทบ pipeline เลย)
+      DB_URL: postgresql+psycopg2://pm25:${PM25_DB_PASSWORD:-pm25-local-only}@postgres_target:5432/pm25
+      # แหล่งข้อมูลจริงของ DAG ingest: openmeteo | air4thai
+      PM25_DATA_SOURCE: ${PM25_DATA_SOURCE:-openmeteo}
+      AIR4THAI_ENDPOINT: ${AIR4THAI_ENDPOINT:-https://air4thai.pcd.go.th/forapiV2/getAirReportV2.php}
+      AIR4THAI_STATIONS: ${AIR4THAI_STATIONS:-02t,03t,05t,08t,10t,11t,12t,13t,14t,15t,17t,19t,20t,21t,22t,23t,24t,26t,27t,50t}
+      TZ: Asia/Bangkok
+    ports:
+      - "9090:8080"                      # ← เปลี่ยนจาก 8080 เป็น 9090 (ฝั่งซ้ายเท่านั้น)
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      # โค้ดข้อสอบเดิม: อ่านอย่างเดียว เพื่อให้ DAG เรียกสคริปต์ต้นฉบับได้เสมอ
+      - ./src:/opt/airflow/project/src:ro
+      - ./spark:/opt/airflow/project/spark:ro
+      - ./sql:/opt/airflow/project/sql:ro
+      # ข้อมูล + ผลลัพธ์: เขียนได้ (task1 สร้าง raw, task3 เขียน processed,
+      # task5 เขียนกราฟ, fetcher ผนวก source CSV)
+      - ./data:/opt/airflow/project/data
+      - ./output:/opt/airflow/project/output
+      - airflow_logs:/opt/airflow/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  postgres_target_data:
+  airflow_logs:

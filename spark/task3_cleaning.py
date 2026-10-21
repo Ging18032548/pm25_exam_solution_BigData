@@ -15,6 +15,7 @@ TASK 3 -- Cleaning ด้วย PySpark (25 คะแนน)
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from pyspark.sql import SparkSession
@@ -35,7 +36,10 @@ def main() -> None:
              .appName("pm25-cleaning")
              .master("local[*]")
              .config("spark.hadoop.io.native.lib.available", "false")
-             .config("spark.sql.warehouse.dir", "file:///C:/temp")
+             # cross-platform: Windows สอบใช้ %TEMP%  / Linux container ใช้ /tmp
+             .config("spark.sql.warehouse.dir",
+                     str(Path(tempfile.gettempdir()) / "spark-warehouse"))
+             .config("spark.local.dir", tempfile.gettempdir())
              .getOrCreate())
     spark.sparkContext.setLogLevel("ERROR")
 
@@ -66,7 +70,7 @@ def main() -> None:
     d = F.regexp_extract("reading_time", r"^(\d{1,2})/(\d{1,2})/(\d{4})", 1)
     m = F.regexp_extract("reading_time", r"^(\d{1,2})/(\d{1,2})/(\d{4})", 2)
     y = F.regexp_extract("reading_time", r"^(\d{1,2})/(\d{1,2})/(\d{4})", 3).cast("int") - 543
-    t = F.regexp_extract("reading_time", r"(\d{1,2}:\d{2})$")
+    t = F.regexp_extract("reading_time", r"(\d{1,2}:\d{2})$", 1)
     be_ts = F.to_timestamp(F.concat_ws(" ", F.concat_ws("/", d, m, y.cast("string")), t),
                             "dd/MM/yyyy HH:mm")
     df = df.withColumn("reading_ts", F.coalesce(iso_ts, be_ts))

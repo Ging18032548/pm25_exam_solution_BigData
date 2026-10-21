@@ -18,8 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PARQUET = ROOT / "data" / "processed" / "clean.parquet"
 OUT = ROOT / "output"
 
-# ฟอนต์ไทยบน Windows
-matplotlib.rcParams["font.family"] = ["Tahoma", "Leelawadee UI", "sans-serif"]
+# ฟอนต์ไทย: Windows ใช้ Tahoma/Leelawadee, Linux (Docker/Airflow) ใช้ Loma/Garuda
+# จาก package fonts-thai-tlwg ที่ติดตั้งใน airflow image -- แต่ละเครื่องเลือกตัวแรกที่มี
+matplotlib.rcParams["font.family"] = ["sans-serif"]
+matplotlib.rcParams["font.sans-serif"] = [
+    "Tahoma", "Leelawadee UI", "Loma", "Garuda", "Waree", "Noto Sans Thai", "DejaVu Sans",
+]
 
 
 def main() -> None:
