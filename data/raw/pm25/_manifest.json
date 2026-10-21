@@ -1,0 +1,25 @@
+{
+  "source_file": "pm25_readings.csv",
+  "ingested_at": "2026-10-21T08:16:43.820153+00:00",
+  "encoding": "utf-8",
+  "files": [
+    {
+      "path": "data/raw/pm25/year=2025/month=01/part-0.csv",
+      "rows": 1994,
+      "columns": 8,
+      "md5": "038eb624ea02c4102f4a73c155e5c5eb"
+    },
+    {
+      "path": "data/raw/pm25/year=2025/month=02/part-0.csv",
+      "rows": 1820,
+      "columns": 8,
+      "md5": "30c68d6349c769bfe23bda4ec4f037fb"
+    },
+    {
+      "path": "data/raw/pm25/year=2025/month=03/part-0.csv",
+      "rows": 70,
+      "columns": 8,
+      "md5": "7062b2525c7c10644311010387b5eef6"
+    }
+  ]
+}
